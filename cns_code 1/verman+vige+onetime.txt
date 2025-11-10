@@ -1,0 +1,95 @@
+import string, random
+
+#-------VERNAM----
+def ver_gen(l):
+    return [random.randint(0,255) for _ in range(l)]
+
+def ver_encrypt(txt,key):
+    return [ord(txt[i])^key[i] for i in range(len(txt))]
+
+def ver_decrypt(ct,key):
+    return "".join(chr(ct[i]^key[i]) for i in range(len(ct)))
+
+
+#------VIGENERE-------
+def vig_encrypt(txt,key):
+    r=""
+    key=key.upper()
+    j=0
+    for c in txt:
+        if c.isalpha():
+            s=ord(key[j%len(key)])-65
+            if c.isupper():
+                r+=chr((ord(c)-65+s)%26+65)
+            else:
+                r+=chr((ord(c.upper())-65+s)%26+65).lower()
+            j+=1
+        else:
+            r+=c
+    return r
+
+def vig_decrypt(txt,key):
+    r=""
+    key=key.upper()
+    j=0
+    for c in txt:
+        if c.isalpha():
+            s=ord(key[j%len(key)])-65
+            if c.isupper():
+                r+=chr((ord(c)-65-s)%26+65)
+            else:
+                r+=chr((ord(c.upper())-65-s)%26+65).lower()
+            j+=1
+        else:
+            r+=c
+    return r
+
+
+#-----ONE TIME PAD-----
+def otp_encrypt(txt):
+    key = [random.randint(0,255) for _ in txt]  
+    encrypted = [ord(c) ^ key[i] for i, c in enumerate(txt)]  
+    return key, encrypted
+
+def otp_decrypt(encrypted, key):
+    decrypted = ''.join(chr(encrypted[i] ^ key[i]) for i in range(len(encrypted)))
+    return decrypted
+
+while True:
+    print("\n1 Vernam")
+    print("2 Vigenere")
+    print("3 One time pad")
+    print("4 Exit")
+
+    ch=int(input("Choice: "))
+    
+    if ch==1:
+        p=input("Text: ")
+        key=ver_gen(len(p))
+        e=ver_encrypt(p,key)
+        print("Key:",key)
+        print("Encrypted:",e)
+        print("Decrypted:",ver_decrypt(e,key))
+
+    elif ch==2:
+        p=input("Text: ")
+        k=input("Key: ")
+        e=vig_encrypt(p,k)
+        print("Encrypted:",e)
+        print("Decrypted:",vig_decrypt(e,k))
+  
+    elif ch==3:
+        p=input("Text: ")
+        key, encrypted = otp_encrypt(p)
+        print("Key:", key)
+        print("Encrypted:", encrypted)
+        print("Decrypted:", otp_decrypt(encrypted, key))
+
+    elif ch==4:
+        break
+    else:
+        print("Invalid")
+
+  
+
+ 

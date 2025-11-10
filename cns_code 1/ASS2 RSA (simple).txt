@@ -1,0 +1,151 @@
+#------RECIVER-------
+
+import socket
+import random
+import time
+import math
+
+def is_prime(n):
+    if n <= 1:
+        return False
+    for i in range(2, int(math.sqrt(n)) + 1):
+        if n % i == 0:
+            return False
+    return True
+
+def gcd(a, b):
+    while b:
+        a, b = b, a % b
+    return a
+
+def extended_gcd(a, b):
+    if a == 0:
+        return b, 0, 1
+    gcd_val, x1, y1 = extended_gcd(b % a, a)
+    x = y1 - (b // a) * x1
+    y = x1
+    return gcd_val, x, y
+
+def mod_inverse(e, phi):
+    gcd_val, x, _ = extended_gcd(e, phi)
+    if gcd_val != 1:
+        raise ValueError("Inverse doesn't exist")
+    return x % phi
+
+def find_coprime(phi):
+    while True:
+        e = random.randint(2, phi - 1)
+        if gcd(e, phi) == 1:
+            return e
+
+class Receiver:
+    def __init__(self, d, n):
+        self.d = d
+        self.n = n
+
+    def decrypt(self, cipherText):
+        start_time = time.perf_counter()
+        decrypted_text = pow(cipherText, self.d, self.n)
+        decryption_time = time.perf_counter() - start_time
+        return decrypted_text, decryption_time
+
+def main():
+    p = int(input("Enter first Prime Number: "))
+    q = int(input("Enter second Prime Number: "))
+
+    if not (is_prime(p) and is_prime(q)):
+        print("Both p & q must be prime")
+        return
+
+    n = p * q
+    phi = (p - 1) * (q - 1)
+    e = find_coprime(phi)
+    d = mod_inverse(e, phi)
+
+    print(f"Generated Public Key: (e={e}, n={n})")
+    print(f"Generated Private Key: (d={d}, n={n})")
+
+    receiver = Receiver(d, n)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('localhost', 65432))
+        s.listen()
+        print("Receiver: Waiting for connection from Sender...")
+
+        conn, addr = s.accept()
+        with conn:
+            print(f"Receiver: Connected by {addr}")
+
+            public_key = f"{e},{n}"
+            conn.sendall(public_key.encode())
+            print("Receiver: Public Key is sent to Sender")
+
+            data = conn.recv(1024)
+            if data:
+                cipherText = int(data.decode())
+                print(f"Receiver: Ciphertext received: {cipherText}")
+
+                decrypted_text, decryption_time = receiver.decrypt(cipherText)
+
+                print(f"Receiver: Decrypted Text is: {decrypted_text}")
+                print(f"Decryption Time is: {decryption_time:.6f} seconds")
+
+if __name__ == "__main__":
+    main()
+
+
+#------SENDER-------
+import socket
+import time
+
+class Sender:
+    def __init__(self, e, n):
+        self.e = e
+        self.n = n
+
+    def encrypt(self, plaintext):
+        start_time = time.perf_counter()
+        cipherText = pow(plaintext, self.e, self.n)
+        encryption_time = time.perf_counter() - start_time
+        return cipherText, encryption_time
+
+def main():
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect(('localhost', 65432))
+            print("Sender: Requesting public key from receiver...")
+            data = s.recv(1024).decode()
+            e, n = map(int, data.split(','))
+            print(f"Sender: Received public key (e={e}, n={n}) from receiver")
+
+            while True:
+                try:
+                    plaintext = int(input("Sender: Enter an integer plaintext to encrypt: "))
+                    if plaintext <= 0 or plaintext >= n:
+                        raise ValueError("Plaintext must be in the range (0, n)")
+                    break
+                except ValueError as ve:
+                    print(f"Invalid input: {ve}, Please try again")
+
+            sender = Sender(e, n)
+            cipherText, encryption_time = sender.encrypt(plaintext)
+
+            print(f"Sender: Ciphertext is: {cipherText}")
+            print(f"Encryption Time is: {encryption_time:.6f} seconds")
+
+            s.sendall(str(cipherText).encode())
+            print("Sender: Ciphertext is sent to receiver")
+
+    except socket.error as e:
+        print(f"Socket Error: {e}")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+if __name__ == "__main__":
+    main()
+
+
+#---
+COMMAND
+python receiver.py
+python sender.py

@@ -1,0 +1,258 @@
+#----------------app.py--------
+
+from flask import Flask, render_template, request, redirect, url_for, flash, session
+from flask_bcrypt import Bcrypt
+import sqlite3, os
+
+app = Flask(__name__)
+app.secret_key = "secret123"
+bcrypt = Bcrypt(app)
+
+DB_PATH = "users.db"
+
+# --- Create table if not exists ---
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""CREATE TABLE IF NOT EXISTS users(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        password TEXT
+    )""")
+    conn.close()
+
+init_db()
+
+# --- Dictionary to track login attempts ---
+login_attempts = {}
+
+@app.route('/')
+def home():
+    return render_template('index.html')
+
+@app.route('/register', methods=['GET','POST'])
+def register():
+    if request.method == 'POST':
+        user = request.form['username']
+        pw = request.form['password']
+        hashed = bcrypt.generate_password_hash(pw).decode('utf-8')
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("INSERT INTO users(username,password) VALUES(?,?)", (user, hashed))
+            conn.commit()
+            conn.close()
+            flash("Registered successfully! Please log in.", "success")
+            return redirect(url_for('login'))
+        except:
+            flash("Username already exists!", "danger")
+    return render_template('register.html')
+
+@app.route('/login', methods=['GET','POST'])
+def login():
+    if request.method == 'POST':
+        user = request.form['username']
+        pw = request.form['password']
+
+        # Initialize user attempt count if not exists
+        if user not in login_attempts:
+            login_attempts[user] = 0
+
+        # Check if user exceeded attempts
+        if login_attempts[user] >= 3:
+            flash("Too many failed attempts! Please try again later.", "danger")
+            return render_template('login.html')
+
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT password FROM users WHERE username=?", (user,))
+        row = cur.fetchone()
+        conn.close()
+
+        if row and bcrypt.check_password_hash(row[0], pw):
+            session['username'] = user
+            login_attempts[user] = 0  # reset on successful login
+            flash("Login successful!", "success")
+            return redirect(url_for('dashboard'))
+        else:
+            login_attempts[user] += 1
+            remaining = 3 - login_attempts[user]
+            if remaining > 0:
+                flash(f"Invalid username or password! {remaining} attempt(s) left.", "danger")
+            else:
+                flash("Account locked! Too many failed attempts.", "danger")
+
+    return render_template('login.html')
+
+@app.route('/dashboard')
+def dashboard():
+    if 'username' in session:
+        return render_template('dashboard.html', user=session['username'])
+    return redirect(url_for('login'))
+
+@app.route('/logout')
+def logout():
+    session.pop('username', None)
+    flash("Logged out!", "info")
+    return redirect(url_for('home'))
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
+#---------------login.html-------------
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="theme-pink">
+    <div class="container">
+        <h3>Login</h3>
+
+        {% for msg in get_flashed_messages(with_categories=true) %}
+            <p class="flash-msg">{{ msg[1] }}</p>
+        {% endfor %}
+
+        <form method="POST">
+            <input type="text" name="username" placeholder="Username" required><br>
+            <input type="password" name="password" placeholder="Password" required><br>
+            <button type="submit">Login</button>
+        </form>
+
+        <p><a href="/register">Create new account</a></p>
+    </div>
+</body>
+</html>
+
+#------------index.html-----------
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Home</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="theme-blue">
+    <div class="container">
+        <h2>Welcome</h2>
+        <a href="/login"><button>Login</button></a>
+        <a href="/register"><button>Register</button></a>
+    </div>
+</body>
+</html>
+
+
+#-----------register.html----------------
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Register</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="theme-purple">
+    <div class="container">
+        <h3>Register</h3>
+
+        {% for msg in get_flashed_messages(with_categories=true) %}
+            <p class="flash-msg">{{ msg[1] }}</p>
+        {% endfor %}
+
+        <form method="POST">
+            <input type="text" name="username" placeholder="Username" required><br>
+            <input type="password" name="password" placeholder="Password" required><br>
+            <button type="submit">Register</button>
+        </form>
+        <p><a href="/login">Already have an account?</a></p>
+    </div>
+</body>
+</html>
+
+
+#-------------------dashboard.html-------------
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="theme-blue">
+    <div class="container">
+        <h3>Hello, {{ user }} 👋</h3>
+        <a href="/logout"><button>Logout</button></a>
+    </div>
+</body>
+</html>
+
+
+#------------------style.css--------------------
+
+/* Background Themes */
+.theme-blue {
+    background: #4df1fd;
+}
+
+.theme-purple {
+    background: #cc84e9;
+}
+
+.theme-pink {
+    background: #ed84bc;
+}
+
+/* Page Styling */
+body {
+    font-family: Arial;
+    padding: 0;
+    margin: 0;
+}
+
+.container {
+    width: 330px;
+    margin: 100px auto;
+    background: rgb(225, 128, 220);
+    padding: 25px;
+    text-align: center;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+}
+
+input, button {
+    width: 90%;
+    padding: 10px;
+    margin: 12px 0;
+    border-radius: 6px;
+    border: 1px solid #f242a6;
+}
+
+button {
+    background: #e08a9a;
+    color: rgb(7, 7, 7);
+    cursor: pointer;
+    font-size: 15px;
+}
+
+button:hover {
+    background: #005dcc;
+}
+
+.flash-msg {
+    color: red;
+}
+
+
+
+
+
+output:-
+commands:-
+
+###also download db browser####
+
+1)cd OneDrive\Desktop\ASS7
+2)python -m venv venv
+3)venv\Scripts\activate
+4)pip install flask flask-bcrypt
+5)python app.py

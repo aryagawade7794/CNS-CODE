@@ -1,0 +1,377 @@
+#-------------------RECIVER-----------------------
+# receiver.py
+# Receiver: generates RSA keypair, listens for sender connection,
+# exchanges public keys, receives ciphertext + signature, decrypts & verifies.
+
+import socket
+from signer import generate_keypair_from_primes, rsa_decrypt_int, int_to_bytes, verify_signature
+import sys
+
+HOST = 'localhost'
+PORT = 65432
+
+def main():
+    # For demo, ask user to provide two primes for Receiver
+    try:
+        p = int(input("Receiver: Enter prime p : ").strip())
+        q = int(input("Receiver: Enter prime q : ").strip())
+    except Exception as e:
+        print("Invalid input:", e)
+        return
+
+    try:
+        e_r, d_r, n_r = generate_keypair_from_primes(p, q)
+    except Exception as e:
+        print("Key generation error:", e)
+        return
+
+    print(f"Receiver: Generated keypair. Public (e={e_r}, n={n_r}) Private d stored securely.")
+
+    # Start listening
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((HOST, PORT))
+        s.listen(1)
+        print(f"Receiver: Listening on {HOST}:{PORT} ... (run sender.py next)")
+
+        conn, addr = s.accept()
+        with conn:
+            print('Receiver: Connected by', addr)
+
+            # 1) Receive Sender's public key first (we expect a line like: PUB_S:e,n)
+            data = conn.recv(1024).decode()
+            if not data:
+                print("Receiver: No data received. Closing.")
+                return
+
+            if data.startswith("PUB_S:"):
+                payload = data[len("PUB_S:"):].strip()
+                e_s, n_s = map(int, payload.split(','))
+                print(f"Receiver: Received Sender's public key (e_s={e_s}, n_s={n_s})")
+            else:
+                print("Receiver: Expected Sender public key first. Received:", data)
+                return
+
+            # 2) Send Receiver public key back for Sender to use
+            pub_r_msg = f"PUB_R:{e_r},{n_r}"
+            conn.sendall(pub_r_msg.encode())
+            print("Receiver: Sent own public key to Sender")
+
+            # 3) Now receive package containing ciphertext and signature
+            # Expect format: MSG:<cipher_int>|SIG:<sig_int>
+            data = conn.recv(4096).decode()
+            if not data:
+                print("Receiver: No package received.")
+                return
+
+            if not data.startswith("MSG:"):
+                print("Receiver: Unexpected package format.")
+                return
+
+            try:
+                # parse
+                parts = data.split("|")
+                c_part = parts[0]
+                s_part = parts[1]
+                c_int = int(c_part[len("MSG:"):])
+                sig_int = int(s_part[len("SIG:"):])
+            except Exception as e:
+                print("Receiver: Error parsing package:", e)
+                return
+
+            print(f"Receiver: Received ciphertext (int) and signature (int). Decrypting...")
+
+            # decrypt ciphertext using Receiver private key
+            m_int = rsa_decrypt_int(c_int, d_r, n_r)
+            m_bytes = int_to_bytes(m_int)
+            try:
+                # For display, assume message is ASCII/utf-8
+                message_text = m_bytes.decode('utf-8')
+            except:
+                message_text = repr(m_bytes)
+
+            print(f"Receiver: Decrypted message bytes: {m_bytes}")
+            print(f"Receiver: Decrypted message text: {message_text}")
+
+            # verify signature using Sender's public key
+            valid = verify_signature(m_bytes, sig_int, e_s, n_s)
+            if valid:
+                print("Receiver: Signature is VALID. Integrity & authenticity confirmed.")
+            else:
+                print("Receiver: Signature is INVALID! Message may be tampered or not from claimed sender.")
+
+if __name__ == "__main__":
+    main()
+
+
+#---------------------------SENDER---------------
+# sender.py
+# Sender: generates own keypair (for signing), connects to Receiver,
+# exchanges public keys, signs the message and encrypts it for Receiver,
+# then sends ciphertext + signature.
+
+import socket
+from signer import generate_keypair_from_primes, rsa_encrypt_int, bytes_to_int, sign_bytes
+import sys
+
+HOST = 'localhost'
+PORT = 65432
+
+def main():
+    # For demo, ask user to provide primes for Sender keypair
+    try:
+        p = int(input("Sender: Enter prime p: ").strip())
+        q = int(input("Sender: Enter prime q: ").strip())
+    except Exception as e:
+        print("Invalid input:", e)
+        return
+
+    try:
+        e_s, d_s, n_s = generate_keypair_from_primes(p, q)
+    except Exception as e:
+        print("Key generation error:", e)
+        return
+
+    print(f"Sender: Generated keypair. Public (e={e_s}, n={n_s}) Private d stored securely.")
+
+    # Connect to Receiver
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.connect((HOST, PORT))
+        print("Sender: Connected to Receiver")
+
+        # 1) Send Sender public key first to Receiver
+        pub_s_msg = f"PUB_S:{e_s},{n_s}"
+        s.sendall(pub_s_msg.encode())
+        print("Sender: Sent my public key to Receiver")
+
+        # 2) Receive Receiver's public key
+        data = s.recv(1024).decode()
+        if not data or not data.startswith("PUB_R:"):
+            print("Sender: Did not receive Receiver public key. Received:", data)
+            return
+        payload = data[len("PUB_R:"):].strip()
+        e_r, n_r = map(int, payload.split(','))
+        print(f"Sender: Received Receiver's public key (e_r={e_r}, n_r={n_r})")
+
+        # 3) Get message from user (as text)
+        message_text = input("Sender: Enter message text to send to Receiver: ").strip()
+        message_bytes = message_text.encode('utf-8')
+
+        # 4) Sign the message using Sender private key (sign hash)
+        sig_int = sign_bytes(message_bytes, d_s, n_s)
+        print(f"Sender: Signature (int) computed.")
+
+        # 5) Encrypt the plaintext message bytes using Receiver public key
+        # Convert message bytes to integer
+        m_int = bytes_to_int(message_bytes)
+        if m_int >= n_r:
+            print("Sender: WARNING: message integer >= receiver modulus n. For real messages, use hybrid encryption.")
+            print("You must use smaller messages or hybrid RSA+AES for larger messages.")
+            # For demo we'll still attempt but it will be incorrect; typically abort here.
+            # We'll proceed but note this is only demo.
+        c_int = rsa_encrypt_int(m_int, e_r, n_r)
+        print("Sender: Message encrypted with Receiver public key.")
+
+        # 6) Send package: MSG:<c_int>|SIG:<sig_int>
+        package = f"MSG:{c_int}|SIG:{sig_int}"
+        s.sendall(package.encode())
+        print("Sender: Sent ciphertext and signature to Receiver. Done.")
+
+if __name__ == "__main__":
+    main()
+
+#-------------------------SIGNER------------------
+
+# signer.py
+# Utilities: simple RSA key generation, encrypt/decrypt int, sign/verify, hash helpers.
+# Educational/demo only. Use real crypto libraries for production!
+
+import random
+import math
+import hashlib
+
+def is_prime(n):
+    if n <= 1:
+        return False
+    if n <= 3:
+        return True
+    if n % 2 == 0:
+        return False
+    r = int(math.isqrt(n))
+    for i in range(3, r+1, 2):
+        if n % i == 0:
+            return False
+    return True
+
+def gcd(a, b):
+    while b:
+        a, b = b, a % b
+    return a
+
+def extended_gcd(a, b):
+    if a == 0:
+        return (b, 0, 1)
+    gcd_val, x1, y1 = extended_gcd(b % a, a)
+    x = y1 - (b // a) * x1
+    y = x1
+    return gcd_val, x, y
+
+def mod_inverse(e, phi):
+    gcd_val, x, _ = extended_gcd(e, phi)
+    if gcd_val != 1:
+        raise ValueError("Inverse doesn't exist")
+    return x % phi
+
+def find_coprime(phi):
+    while True:
+        e = random.randint(2, phi - 1)
+        if gcd(e, phi) == 1:
+            return e
+
+def generate_keypair_from_primes(p, q):
+    """Generate RSA keypair (e, d, n) from primes p and q."""
+    if not (is_prime(p) and is_prime(q)):
+        raise ValueError("p and q must be prime.")
+    n = p * q
+    phi = (p - 1) * (q - 1)
+    e = find_coprime(phi)
+    d = mod_inverse(e, phi)
+    return (e, d, n)
+
+# helpers to convert between bytes and ints
+def bytes_to_int(b: bytes) -> int:
+    return int.from_bytes(b, byteorder='big')
+
+def int_to_bytes(i: int) -> bytes:
+    # compute minimal length
+    length = (i.bit_length() + 7) // 8
+    if length == 0:
+        length = 1
+    return i.to_bytes(length, byteorder='big')
+
+# RSA primitive operations (no padding)
+def rsa_encrypt_int(m_int: int, e: int, n: int) -> int:
+    return pow(m_int, e, n)
+
+def rsa_decrypt_int(c_int: int, d: int, n: int) -> int:
+    return pow(c_int, d, n)
+
+# Hash using SHA-256
+def sha256_bytes(b: bytes) -> bytes:
+    return hashlib.sha256(b).digest()
+
+# Signing: sign hash (as int) with private key d,n
+def sign_bytes(message_bytes: bytes, d: int, n: int) -> int:
+    h = sha256_bytes(message_bytes)
+    h_int = bytes_to_int(h)
+    sig = pow(h_int, d, n)
+    return sig  # integer signature
+
+def verify_signature(message_bytes: bytes, signature_int: int, e: int, n: int) -> bool:
+    h = sha256_bytes(message_bytes)
+    h_int = bytes_to_int(h)
+    v = pow(signature_int, e, n)
+    return v == h_int
+
+#---------------------TEMPCODERUNNERFILE----------
+
+import socket
+import random
+import time
+import math
+
+def is_prime(n):
+    if n <= 1:
+        return False
+    for i in range(2, int(math.sqrt(n)) + 1):
+        if n % i == 0:
+            return False
+    return True
+
+def gcd(a, b):
+    while b:
+        a, b = b, a % b
+    return a
+
+def extended_gcd(a, b):
+    if a == 0:
+        return b, 0, 1
+    gcd_val, x1, y1 = extended_gcd(b % a, a)
+    x = y1 - (b // a) * x1
+    y = x1
+    return gcd_val, x, y
+
+def mod_inverse(e, phi):
+    gcd_val, x, _ = extended_gcd(e, phi)
+    if gcd_val != 1:
+        raise ValueError("Inverse doesn't exist")
+    return x % phi
+
+def find_coprime(phi):
+    while True:
+        e = random.randint(2, phi - 1)
+        if gcd(e, phi) == 1:
+            return e
+
+class Receiver:
+    def __init__(self, d, n):
+        self.d = d
+        self.n = n
+
+    def decrypt(self, cipherText):
+        start_time = time.perf_counter()
+        decrypted_text = pow(cipherText, self.d, self.n)
+        decryption_time = time.perf_counter() - start_time
+        return decrypted_text, decryption_time
+
+def main():
+    p = int(input("Enter first Prime Number: "))
+    q = int(input("Enter second Prime Number: "))
+
+    if not (is_prime(p) and is_prime(q)):
+        print("Both p & q must be prime")
+        return
+
+    n = p * q
+    phi = (p - 1) * (q - 1)
+    e = find_coprime(phi)
+    d = mod_inverse(e, phi)
+
+    print(f"Generated Public Key: (e={e}, n={n})")
+    print(f"Generated Private Key: (d={d}, n={n})")
+
+    receiver = Receiver(d, n)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('localhost', 65432))
+        s.listen()
+        print("Receiver: Waiting for connection from Sender...")
+
+        conn, addr = s.accept()
+        with conn:
+            print(f"Receiver: Connected by {addr}")
+
+            public_key = f"{e},{n}"
+            conn.sendall(public_key.encode())
+            print("Receiver: Public Key is sent to Sender")
+
+            data = conn.recv(1024)
+            if data:
+                cipherText = int(data.decode())
+                print(f"Receiver: Ciphertext received: {cipherText}")
+
+                decrypted_text, decryption_time = receiver.decrypt(cipherText)
+
+                print(f"Receiver: Decrypted Text is: {decrypted_text}")
+                print(f"Decryption Time is: {decryption_time:.6f} seconds")
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+
+OUTPUT
+COMMAND
+python receiver.py (p=10007 ; q=10009)
+python sender.py (p=10037 ; q=10039

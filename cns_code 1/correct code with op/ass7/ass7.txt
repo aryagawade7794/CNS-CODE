@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Secure Single Page Auth</title>
+<style>
+body {font-family: Arial; background:#f4f4f4; padding:30px;}
+container {width:400px; margin:auto;}
+input,button {width:100%; padding:10px; margin-top:10px;}
+#out {margin-top:20px; font-weight:bold;}
+</style>
+</head>
+<body>
+
+<h2>Secure Login System (Single Page)</h2>
+
+<h3>Register</h3>
+<input id="regUser" placeholder="Username">
+<input id="regPass" placeholder="Password" type="password">
+<button onclick="register()">Register</button>
+
+<h3>Login</h3>
+<input id="logUser" placeholder="Username">
+<input id="logPass" placeholder="Password" type="password">
+<button onclick="login()">Login</button>
+
+<div id="out"></div>
+
+<script>
+let users = {}
+
+async function hash(p){
+  const enc = new TextEncoder().encode(p)
+  const buf = await crypto.subtle.digest("SHA-256", enc)
+  return [...new Uint8Array(buf)].map(x => x.toString(16).padStart(2,"0")).join("")
+}
+
+async function register(){
+  let u = document.getElementById("regUser").value
+  let p = document.getElementById("regPass").value
+  if(!u||!p){out("Missing fields");return}
+  if(users[u]){out("User exists");return}
+  users[u] = await hash(p)
+  out("Registration Successful")
+}
+
+async function login(){
+  let u = document.getElementById("logUser").value
+  let p = document.getElementById("logPass").value
+  if(!u||!p){out("Missing fields");return}
+  if(!users[u]){out("User not found");return}
+  let h = await hash(p)
+  if(h===users[u]) out("Login Successful")
+  else out("Invalid Password")
+}
+
+function out(m){document.getElementById("out").innerHTML=m}
+</script>
+
+</body>
+</html>

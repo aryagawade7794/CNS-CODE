@@ -1,0 +1,21 @@
+def encrypt(msg, key):
+    e=""
+    for c in msg:
+        x=(ord(c)+key)^key
+        e+=chr(x%256)
+    return e
+
+def decrypt(msg, key):
+    d=""
+    for c in msg:
+        x=(ord(c)^key)-key
+        d+=chr(x%256)
+    return d
+
+m=input("Message: ")
+k=int(input("Key: "))
+
+enc=encrypt(m,k)
+print("Encrypted:",enc)
+dec=decrypt(enc,k)
+print("Decrypted:",dec)
